@@ -1,0 +1,17 @@
+[Unit]
+Description=Proxmox TUI Panel on tty1 (kmscon wrapper)
+After=systemd-user-sessions.service plymouth-quit-wait.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/bin/kmscon --vt 1 --no-hwaccel --no-reset-env --xkb-layout es \
+          --font-name "DejaVu Sans Mono" --font-size 28 --mouse --login -- \
+          /opt/lxc-panel/venv/bin/python /opt/lxc-panel/app.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

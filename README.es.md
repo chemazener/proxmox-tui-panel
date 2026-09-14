@@ -1,0 +1,159 @@
+[English](README.md) | **Español**
+
+# Proxmox TUI Panel
+
+Un panel de terminal a pantalla completa para Proxmox VE que lista todos los
+contenedores y máquinas virtuales con CPU, memoria, disco, GPU y red en vivo, y
+permite arrancarlos, pararlos o abrirles una consola. Corre **en el propio host**
+—sin navegador, sin agente, sin túnel SSH— así que funciona en el monitor de la
+máquina.
+
+![Mosaico completo](docs/grid.png)
+
+Está hecho con [Textual](https://textual.textualize.io/). Lee todo de una sola
+llamada a `pvesh get /cluster/resources` y actúa mediante `pct` y `qm`.
+
+## Para qué
+
+La interfaz web de Proxmox está muy bien, pero necesita otro ordenador. Este
+panel convierte la pantalla del propio hipervisor en un cuadro de mandos:
+enchufas un monitor y ves qué está corriendo y puedes actuar, incluso con la red
+caída.
+
+## Qué hace
+
+- **Mosaico adaptativo**: el número de columnas se deduce del ancho disponible y
+  las filas mantienen siempre el alto completo de una tarjeta. Cuando no cabe
+  todo, el mosaico **hace scroll** en vez de aplastar las tarjetas — así nunca
+  se pierde la fila de botones.
+- **Agrupado por estado**: primero las encendidas, después las apagadas,
+  ordenadas por VMID dentro de cada grupo. El orden solo se recalcula cuando una
+  máquina cambia de estado de verdad, así que no parpadea en cada refresco.
+- **Métricas por máquina**: `⚙` CPU · `▤` memoria · `▦` disco · `◈` GPU · `⇅` red,
+  con barras sólidas que pasan a amarillo por encima del 50 % y a rojo por encima
+  del 80 %, más los valores absolutos (vCPUs, GB usados/totales, tasas y totales
+  de transferencia).
+- **Entiende el passthrough de GPU**: las VMs que tienen una GPU por VFIO se
+  muestran como `VFIO·<etiqueta>` en lugar de un 0 % que no significa nada.
+- **Acciones**: iniciar, parar y, en contenedores arrancados, abrir consola.
+- **Vistas separadas**: `--filtro=vivas` y `--filtro=apagadas` limitan el panel a
+  las máquinas encendidas o apagadas, para poder dedicar una pantalla a cada una.
+- Ratón y teclado: `Tab` y flechas para moverse, `Enter` para pulsar, `r` para
+  refrescar, `q` para salir.
+
+### Scroll en lugar de recorte
+
+En un terminal bajo, las tarjetas conservan su alto completo y el mosaico hace
+scroll:
+
+![Scroll en un terminal pequeño](docs/scroll.png)
+
+### Una vista por estado
+
+![Solo las máquinas encendidas](docs/running.png)
+
+## Requisitos
+
+- Proxmox VE (probado en 8.x y 9.x) — `pvesh`, `pct` y `qm` en el `PATH`
+- Python 3.11 o superior
+- [Textual](https://pypi.org/project/textual/) 8.x
+- Opcional, para el monitor físico: [kmscon](https://github.com/Aetf/kmscon) con
+  su módulo `mod-pango.so`, y una fuente monoespaciada con buena cobertura
+  Unicode (DejaVu Sans Mono va bien)
+
+## Instalación
+
+```bash
+git clone https://github.com/chemazener/proxmox-tui-panel.git
+cd proxmox-tui-panel
+
+install -d /opt/lxc-panel
+install -m 644 app.py /opt/lxc-panel/app.py
+python3 -m venv /opt/lxc-panel/venv
+/opt/lxc-panel/venv/bin/pip install "textual==8.2.7"
+```
+
+Para probarlo por SSH:
+
+```bash
+/opt/lxc-panel/venv/bin/python /opt/lxc-panel/app.py
+```
+
+### En el monitor del host (opcional)
+
+```bash
+install -d /etc/lxc-panel
+install -m 644 lxc-panel.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now lxc-panel.service
+```
+
+El unit envuelve el panel en kmscon sobre `tty1`, que es lo que da una fuente
+decente y soporte de ratón en la consola. Lleva `Conflicts=getty@tty1.service`,
+así que el panel sustituye al login de tty1.
+
+## Configuración
+
+Todo lo propio de cada máquina vive en `/etc/lxc-panel/config.json`, que **no**
+forma parte de este repositorio. Sin él el panel funciona igual, solo que no
+puede etiquetar el passthrough de GPU. Copia `config.example.json` y ajústalo:
+
+| Clave | Significado |
+|---|---|
+| `gpu_passthrough_pci` | `{"<prefijo-pci>": "<etiqueta>"}`. Toda VM cuya configuración tenga una línea `hostpci` que case con un prefijo se muestra como `VFIO·<primera letra de la etiqueta>`. Los prefijos salen de `lspci`. |
+| `subtitulo` | Texto junto al título. Vacío = usa el hostname. |
+
+```bash
+install -m 600 config.example.json /etc/lxc-panel/config.json
+```
+
+## Notas y trampas
+
+- **`--font-size` no hace nada y los iconos salen como cajas.** Significa que
+  kmscon ha caído a su fuente bitmap interna `8x16` porque no pudo cargar
+  `mod-pango.so`. Comprueba
+  `journalctl -u lxc-panel | grep "font engine"`: tiene que decir `[pango]`. El
+  módulo se carga con `dlopen`, así que un `ldd` sobre el binario de kmscon no
+  delata la dependencia que falta.
+- **Los emoji de color no se renderizan** en la consola. DejaVu Sans Mono no
+  tiene glifos de emoji, así que el panel usa símbolos monocromos a propósito.
+  Para comprobar un glifo candidato:
+  `fc-query -f "%{charset}" /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf`.
+- **Dos monitores no pueden mostrar vistas distintas bajo kmscon.** Un «seat»
+  posee un dispositivo DRM completo, no conectores individuales, así que dos
+  salidas de la misma GPU acaban espejadas. Repartir vistas entre pantallas
+  físicas exige un compositor (sway y similares) que sepa colocar una ventana
+  por salida.
+- **El panel no puede correr mientras la GPU que mueve la consola está pasada**
+  por VFIO a una VM: el conflicto de DRM master deja la pantalla en negro.
+- Las consolas se abren con `lxc-console`, no con `pct console`. Este último
+  envuelve la sesión en un `dtach` persistente que no se cierra solo y deja el
+  panel colgado.
+
+## Previsualizar cambios sin tocar el monitor
+
+Textual puede renderizar la aplicación headless, que es lo cómodo para revisar
+cambios de maquetación:
+
+```python
+import asyncio, sys
+sys.path.insert(0, "/opt/lxc-panel")
+import app as A
+
+A.list_machines = lambda: [...]          # datos de muestra, sin host en vivo
+
+async def shot():
+    app = A.LXCPanel()
+    async with app.run_test(size=(160, 50)) as pilot:
+        await pilot.pause()
+        open("out.svg", "w").write(app.export_screenshot())
+
+asyncio.run(shot())
+```
+
+El SVG se convierte a PNG con cualquier navegador:
+`chromium --headless --screenshot=out.png --window-size=2200,1300 out.svg`.
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE).
