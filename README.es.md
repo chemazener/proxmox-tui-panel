@@ -29,7 +29,7 @@ caída.
 - **Agrupado por estado**: primero las encendidas, después las apagadas,
   ordenadas por VMID dentro de cada grupo. El orden solo se recalcula cuando una
   máquina cambia de estado de verdad, así que no parpadea en cada refresco.
-- **Métricas por máquina**: `⚙` CPU · `▤` memoria · `▦` disco · `◈` GPU · `⇅` red,
+- **Métricas por máquina**: `⚙ CPU` · `▤ MEM` · `▦ DISK` · `◈ GPU` · `⇅ NET`,
   con barras sólidas que pasan a amarillo por encima del 50 % y a rojo por encima
   del 80 %, más los valores absolutos (vCPUs, GB usados/totales, tasas y totales
   de transferencia).
@@ -161,6 +161,12 @@ install -m 600 config.example.json /etc/lxc-panel/config.json
   `journalctl -u lxc-panel | grep "font engine"`: tiene que decir `[pango]`. El
   módulo se carga con `dlopen`, así que un `ldd` sobre el binario de kmscon no
   delata la dependencia que falta.
+- **`--font-size` puede ignorarse sin avisar.** La geometría del terminal sale de
+  las métricas de celda de la fuente, así que menos tamaño = más columnas. En uno
+  de mis hosts la opción funciona; en otro kmscon da siempre celdas de 8x16 sea
+  cual sea el tamaño (probado con 16, 40 y con `--font-dpi` explícito), aunque
+  diga `font engine [pango]`. Mide antes de dar nada por hecho:
+  `python3 -c "import fcntl,struct,termios;f=open('/dev/tty1','rb');print(struct.unpack('HHHH',fcntl.ioctl(f,termios.TIOCGWINSZ,b'\0'*8))[:2])"`
 - **Los emoji de color no se renderizan** en la consola. DejaVu Sans Mono no
   tiene glifos de emoji, así que el panel usa símbolos monocromos a propósito.
   Para comprobar un glifo candidato:

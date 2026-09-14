@@ -316,6 +316,14 @@ _IC_DISK = "▦"
 _IC_GPU  = "◈"
 _IC_NET  = "⇅"
 
+# Icono + palabra. El icono solo era ambiguo (▤ y ▦ se parecen demasiado); la
+# palabra al lado cuesta 4 celdas por fila y las tarjetas ya dan de sí.
+_LBL_CPU  = f"{_IC_CPU} CPU"
+_LBL_MEM  = f"{_IC_MEM} MEM"
+_LBL_DISK = f"{_IC_DISK} DISK"
+_LBL_GPU  = f"{_IC_GPU} GPU"
+_LBL_NET  = f"{_IC_NET} NET"
+
 
 def _style_for(pct: float) -> str:
     if pct >= 80: return "red"
@@ -369,9 +377,9 @@ def _metric_line(label: str, pct: float, value: Optional[float] = None,
     """`value=None` se renderiza como '--' (p.ej. nvidia-smi no medible).
     `extra` añade texto atenuado tras el % (vCPUs, GB absolutos, …)."""
     if value is None:
-        base = f"{label:<2} [{_TRACK}]{_BLOCK * _BAR_LEN}[/]     --"
+        base = f"{label:<6} [{_TRACK}]{_BLOCK * _BAR_LEN}[/]     --"
     else:
-        base = f"{label:<2} {_solid_bar(pct, _style_for(pct))} {pct:5.1f}%"
+        base = f"{label:<6} {_solid_bar(pct, _style_for(pct))} {pct:5.1f}%"
     if extra:
         base += f"   [dim]{extra}[/]"
     return base
@@ -380,8 +388,8 @@ def _metric_line(label: str, pct: float, value: Optional[float] = None,
 def _net_line(m: "Machine") -> str:
     """Fila de red: tasa ↓/↑ + total acumulado."""
     if not m.is_running:
-        return f"{_IC_NET} [dim]—[/]"
-    return (f"{_IC_NET} [green]↓[/] {_fmt_rate(m.net_in_rate):>9}   "
+        return f"{_LBL_NET} [dim]—[/]"
+    return (f"{_LBL_NET} [green]↓[/] {_fmt_rate(m.net_in_rate):>9}   "
             f"[cyan]↑[/] {_fmt_rate(m.net_out_rate):>9}"
             f"   [dim]· Σ ↓{_fmt_bytes(m.netin)} ↑{_fmt_bytes(m.netout)}[/]")
 
@@ -390,8 +398,8 @@ def _gpu_line(m: "Machine") -> str:
     """Línea GPU específica: distingue VFIO (NVIDIA/iGPU) vs. medición pmon."""
     if m.gpu_passthrough:
         marca = str(m.gpu_passthrough)[:1]
-        return f"{_IC_GPU} [cyan]{_BLOCK * _BAR_LEN}[/] VFIO·{marca}"
-    return _metric_line(_IC_GPU, m.gpu_pct, m.gpu)
+        return f"{_LBL_GPU} [cyan]{_BLOCK * _BAR_LEN}[/] VFIO·{marca}"
+    return _metric_line(_LBL_GPU, m.gpu_pct, m.gpu)
 
 
 # ---------- UI ----------
@@ -545,17 +553,17 @@ class MachineCard(Container):
     @staticmethod
     def _cpu_text(m: Machine) -> str:
         extra = f"· {m.maxcpu} vCPU" if m.maxcpu else ""
-        return _metric_line(_IC_CPU, m.cpu_pct, m.cpu_pct, extra)
+        return _metric_line(_LBL_CPU, m.cpu_pct, m.cpu_pct, extra)
 
     @staticmethod
     def _mem_text(m: Machine) -> str:
         extra = f"· {_fmt_gib_pair(m.mem, m.maxmem)}" if m.maxmem else ""
-        return _metric_line(_IC_MEM, m.mem_pct, m.mem_pct, extra)
+        return _metric_line(_LBL_MEM, m.mem_pct, m.mem_pct, extra)
 
     @staticmethod
     def _disk_text(m: Machine) -> str:
         extra = f"· {_fmt_gib_pair(m.disk, m.maxdisk)}" if m.maxdisk else ""
-        return _metric_line(_IC_DISK, m.disk_pct, m.disk_pct, extra)
+        return _metric_line(_LBL_DISK, m.disk_pct, m.disk_pct, extra)
 
     @property
     def kind(self) -> str:
