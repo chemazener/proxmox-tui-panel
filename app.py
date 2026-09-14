@@ -35,7 +35,7 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Header, Static
 
@@ -547,7 +547,7 @@ class LXCPanel(App):
         height: 1; padding: 0 2; background: $primary;
         color: $text; text-style: bold; content-align: left middle;
     }
-    #mosaic {
+    #mosaic, #mosaic-vivas, #mosaic-apagadas {
         layout: grid;
         grid-size: 2;             /* nº de columnas — se recalcula en _relayout */
         grid-gutter: 0 1;         /* sin separación vertical (gana filas para las tarjetas) */
@@ -561,6 +561,12 @@ class LXCPanel(App):
            llenar la pantalla; si aun así no cabe, se hace scroll. */
         grid-rows: 9;
     }
+    /* Pantalla partida: encendidas a la izquierda, apagadas a la derecha. */
+    #split { height: 1fr; }
+    #split .col { width: 1fr; }
+    .col-title { height: 1; padding: 0 2; text-style: bold; }
+    .col-title.on  { color: $success; }
+    .col-title.off { color: $text-muted; }
     #status-line {
         height: 1; padding: 0 2; background: $boost;
         color: $text; text-style: bold; content-align: left middle;
@@ -576,14 +582,34 @@ class LXCPanel(App):
     # lanzando dos instancias: --filtro=vivas y --filtro=apagadas.
     FILTROS = ("todas", "vivas", "apagadas")
 
-    def __init__(self, filtro: str = "todas") -> None:
+    def __init__(self, filtro: str = "todas", mitades: bool = False) -> None:
         super().__init__()
         self.filtro = filtro if filtro in self.FILTROS else "todas"
+        # Pantalla partida en dos columnas. Nace de una limitación física: los dos
+        # monitores del host cuelgan de la misma GPU y kmscon los espeja, así que
+        # no se puede dar una vista a cada pantalla. Partir la única pantalla sí
+        # consigue la separación visual. Solo tiene sentido viendo todo.
+        self.mitades = mitades and self.filtro == "todas"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("Tab / ↑↓ moverse  ·  Enter pulsar  ·  R refrescar  ·  Q salir  ·  (ratón también)", id="toolbar")
-        yield VerticalScroll(id="mosaic")
+        if self.mitades:
+            yield Horizontal(
+                Vertical(
+                    Static("● ENCENDIDAS", classes="col-title on"),
+                    VerticalScroll(id="mosaic-vivas"),
+                    classes="col",
+                ),
+                Vertical(
+                    Static("○ APAGADAS", classes="col-title off"),
+                    VerticalScroll(id="mosaic-apagadas"),
+                    classes="col",
+                ),
+                id="split",
+            )
+        else:
+            yield VerticalScroll(id="mosaic")
         yield Static("", id="status-line")
         yield Footer()
 
@@ -592,55 +618,76 @@ class LXCPanel(App):
         base = CONFIG.get("subtitulo") or socket.gethostname()
         etiqueta = {"vivas": "encendidas", "apagadas": "apagadas"}.get(self.filtro)
         self.sub_title = f"{base} · {etiqueta}" if etiqueta else base
-        self._cards: dict[int, MachineCard] = {}
-        self._orden: list[int] = []
+        # Un registro de tarjetas y un orden por mosaico (en modo mitades hay dos)
+        self._cards: dict[str, dict[int, MachineCard]] = {}
+        self._orden: dict[str, list[int]] = {}
         self.refresh_list()
         self.set_interval(3.0, self.refresh_list)
 
     def refresh_list(self) -> None:
         try:
             machines = list_machines()
-            if self.filtro == "vivas":
-                machines = [m for m in machines if m.is_running]
-            elif self.filtro == "apagadas":
-                machines = [m for m in machines if not m.is_running]
         except Exception as e:
             logging.exception("list_machines failed")
             self.set_status(f"error listando: {e}")
             return
+
+        if self.filtro == "vivas":
+            machines = [m for m in machines if m.is_running]
+        elif self.filtro == "apagadas":
+            machines = [m for m in machines if not m.is_running]
+
+        if self.mitades:
+            self._sync_grid("mosaic-vivas", [m for m in machines if m.is_running])
+            self._sync_grid("mosaic-apagadas", [m for m in machines if not m.is_running])
+        else:
+            self._sync_grid("mosaic", machines)
+
+        cts = [m for m in machines if m.kind == "ct"]
+        vms = [m for m in machines if m.kind == "vm"]
+        self.set_status(
+            f"CT {sum(1 for c in cts if c.is_running)}/{len(cts)}  ·  "
+            f"VM {sum(1 for v in vms if v.is_running)}/{len(vms)} encendidas"
+        )
+
+    def _sync_grid(self, grid_id: str, machines: list[Machine]) -> None:
+        """Deja un mosaico con exactamente estas máquinas, en orden y actualizadas."""
         try:
-            grid = self.query_one("#mosaic", VerticalScroll)
+            grid = self.query_one(f"#{grid_id}", VerticalScroll)
         except Exception:
             return
-        current_ids = set(self._cards.keys())
+
+        cards = self._cards.setdefault(grid_id, {})
+        current_ids = set(cards)
         new_ids = {m.vmid for m in machines}
 
+        # En modo mitades, una máquina que arranca sale de un mosaico y entra en
+        # el otro: esto lo resuelve solo, sin caso especial.
         for vid in current_ids - new_ids:
-            self._cards.pop(vid).remove()
+            cards.pop(vid).remove()
 
         by_id = {m.vmid: m for m in machines}
         for vid in current_ids & new_ids:
-            self._cards[vid].update_machine(by_id[vid])
+            cards[vid].update_machine(by_id[vid])
 
-        # Agrupadas: primero las encendidas, luego las apagadas; por vmid dentro
-        # de cada grupo. En un grid no cabe un separador entre grupos, así que el
-        # agrupamiento ES el orden (el borde verde y el ●/○ ya los distinguen).
+        # Encendidas primero y apagadas después; por vmid dentro de cada grupo.
+        # En un grid no cabe un separador, así que el orden ES el agrupamiento.
         orden = sorted(machines, key=lambda x: (not x.is_running, x.vmid))
 
         for m in orden:
-            if m.vmid not in self._cards:
+            if m.vmid not in cards:
                 card = MachineCard(m)
-                self._cards[m.vmid] = card
+                cards[m.vmid] = card
                 grid.mount(card)
 
-        # Reordenar el DOM solo cuando cambia el agrupamiento (al arrancar o parar
-        # una máquina). Hacerlo en cada refresco de 3 s daría parpadeo y perdería
-        # el foco sin motivo.
+        # Reordenar el DOM solo cuando cambia el orden (al arrancar o parar una
+        # máquina). Hacerlo en cada refresco de 3 s daría parpadeo y perdería el
+        # foco sin motivo.
         ids = [m.vmid for m in orden]
-        if ids != self._orden:
-            self._orden = ids
+        if ids != self._orden.get(grid_id):
+            self._orden[grid_id] = ids
             for idx, vid in enumerate(ids):
-                card = self._cards.get(vid)
+                card = cards.get(vid)
                 if card is None:
                     continue
                 try:
@@ -649,7 +696,11 @@ class LXCPanel(App):
                 except Exception:
                     pass
 
-        self._relayout(len(machines))
+        # El primer pase corre antes de que Textual mida los contenedores (en
+        # modo mitades cada columna aún no sabe que mide la mitad), así que se
+        # recalcula una vez el layout ya tiene tamaños reales.
+        self._relayout(grid, len(machines))
+        self.call_after_refresh(self._relayout, grid, len(machines))
 
         # machines ya viene filtrado, así que los contadores hablan de lo que se ve
         cts = [m for m in machines if m.kind == "ct"]
@@ -669,41 +720,53 @@ class LXCPanel(App):
     # de 150 celdas de ancho.
     _CARD_MAX_W = 60
 
-    def _relayout(self, n: int) -> None:
+    def _relayout(self, grid, n: int) -> None:
         """Columnas según el ANCHO disponible, no según lo que haga falta para
         que todo quepa de alto. Si las filas resultantes no caben, el mosaico
         hace scroll con las tarjetas a tamaño completo; antes se estrujaban las
         filas y se perdía la fila de botones."""
         if n <= 0:
             return
-        try:
-            grid = self.query_one("#mosaic", VerticalScroll)
-        except Exception:
-            return
 
-        # Techo de columnas por ancho: padding lateral (2+2) + barra de scroll
-        usable_w = max(self._CARD_MIN_W, (self.size.width or 160) - 4 - 2)
+        # Medimos el mosaico en sí, no la pantalla: en modo mitades cada columna
+        # tiene la mitad del ancho y hay que decidir por separado.
+        ancho = grid.size.width or (self.size.width or 160)
+        alto = grid.size.height or max(1, (self.size.height or 40) - 4)
+
+        # Descontamos el padding lateral (2+2) y el hueco de la barra de scroll
+        usable_w = max(self._CARD_MIN_W, ancho - 4 - 2)
         max_cols = max(1, min(4, usable_w // self._CARD_MIN_W, n))
-        avail_h = max(1, (self.size.height or 40) - 4)   # header+toolbar+status+footer
+        avail_h = max(1, alto)
 
         # Menos columnas = tarjetas más anchas (títulos sin cortar). Cogemos las
         # MÍNIMAS que sigan cabiendo de alto, así se llena la pantalla sin
         # estirar las filas. Si ninguna combinación cabe, usamos el máximo que
         # permita el ancho y el mosaico hace scroll.
-        cols = max_cols
-        for c in range(1, max_cols + 1):
-            if -(-n // c) * self._CARD_MIN_H <= avail_h:
-                cols = c
-                break
+        # En mitades, SIEMPRE una columna por lado. Cada mitad mide ~76 celdas:
+        # justo una tarjeta cómoda. Partirla en dos sub-columnas de ~35 vuelve a
+        # cortar nombres y valores absolutos, que es lo que se vino a arreglar;
+        # aquí se prefiere scroll antes que apretar.
+        if self.mitades:
+            cols = 1
+        else:
+            cols = max_cols
+            for c in range(1, max_cols + 1):
+                if -(-n // c) * self._CARD_MIN_H <= avail_h:
+                    cols = c
+                    break
 
-        # ...pero nunca tan pocas que las tarjetas queden desmesuradas de ancho
-        cols = max(cols, min(max_cols, -(-usable_w // self._CARD_MAX_W)))
+            # ...pero nunca tan pocas que las tarjetas queden desmesuradas de ancho
+            cols = max(cols, min(max_cols, -(-usable_w // self._CARD_MAX_W)))
 
         if grid.styles.grid_size_columns != cols:
             grid.styles.grid_size_columns = cols
 
     def on_resize(self, event) -> None:
-        self._relayout(len(getattr(self, "_cards", ()) or ()))
+        for grid_id, cards in (getattr(self, "_cards", None) or {}).items():
+            try:
+                self._relayout(self.query_one(f"#{grid_id}", VerticalScroll), len(cards))
+            except Exception:
+                pass
 
     def set_status(self, msg: str) -> None:
         try:
@@ -792,19 +855,23 @@ class LXCPanel(App):
         self.refresh_list()
 
 
-def _parse_filtro(argv: list[str]) -> str:
+def _parse_args(argv: list[str]) -> tuple[str, bool]:
+    filtro, mitades = "todas", False
     for a in argv[1:]:
         if a.startswith("--filtro="):
-            return a.split("=", 1)[1].strip().lower()
-        if a in ("-h", "--help"):
+            filtro = a.split("=", 1)[1].strip().lower()
+        elif a == "--mitades":
+            mitades = True
+        elif a in ("-h", "--help"):
             print(__doc__)
-            print("Uso: app.py [--filtro=todas|vivas|apagadas]")
+            print("Uso: app.py [--filtro=todas|vivas|apagadas] [--mitades]")
+            print("  --mitades   parte la pantalla: encendidas | apagadas")
             raise SystemExit(0)
-    return "todas"
+    return filtro, mitades
 
 
 if __name__ == "__main__":
-    _filtro = _parse_filtro(sys.argv)
+    _filtro, _mitades = _parse_args(sys.argv)
     logging.basicConfig(
         filename=f"/var/log/lxc-panel{'' if _filtro == 'todas' else '-' + _filtro}.log",
         level=logging.INFO,
@@ -814,7 +881,7 @@ if __name__ == "__main__":
                  __import__("os").environ.get("TERM"),
                  sys.stdin.isatty(), sys.stdout.isatty())
     try:
-        LXCPanel(filtro=_filtro).run()
+        LXCPanel(filtro=_filtro, mitades=_mitades).run()
     except Exception:
         logging.error("crashed:\n%s", traceback.format_exc())
         raise

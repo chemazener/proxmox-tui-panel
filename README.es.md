@@ -36,8 +36,10 @@ caída.
 - **Entiende el passthrough de GPU**: las VMs que tienen una GPU por VFIO se
   muestran como `VFIO·<etiqueta>` en lugar de un 0 % que no significa nada.
 - **Acciones**: iniciar, parar y, en contenedores arrancados, abrir consola.
-- **Vistas separadas**: `--filtro=vivas` y `--filtro=apagadas` limitan el panel a
-  las máquinas encendidas o apagadas, para poder dedicar una pantalla a cada una.
+- **Pantalla partida**: `--mitades` divide la pantalla en dos columnas,
+  encendidas a la izquierda y apagadas a la derecha. `--filtro=vivas` y
+  `--filtro=apagadas` limitan el panel a un solo grupo, si prefieres lanzar dos
+  instancias.
 - Ratón y teclado: `Tab` y flechas para moverse, `Enter` para pulsar, `r` para
   refrescar, `q` para salir.
 
@@ -47,6 +49,14 @@ En un terminal bajo, las tarjetas conservan su alto completo y el mosaico hace
 scroll:
 
 ![Scroll en un terminal pequeño](docs/scroll.png)
+
+### Pantalla partida
+
+`--mitades` pone las encendidas a la izquierda y las apagadas a la derecha. Cada
+mitad usa una única columna ancha, así los nombres y los valores absolutos siguen
+legibles y lo que sobra se desplaza:
+
+![Pantalla partida](docs/split.png)
 
 ### Una vista por estado
 
@@ -82,6 +92,7 @@ Ya se puede lanzar:
 
 ```bash
 panel                    # todas las máquinas
+panel --mitades          # partida: encendidas | apagadas
 panel --filtro=vivas     # solo las encendidas
 panel --filtro=apagadas  # solo las apagadas
 ```
@@ -150,8 +161,10 @@ install -m 600 config.example.json /etc/lxc-panel/config.json
 - **Dos monitores no pueden mostrar vistas distintas bajo kmscon.** Un «seat»
   posee un dispositivo DRM completo, no conectores individuales, así que dos
   salidas de la misma GPU acaban espejadas. Repartir vistas entre pantallas
-  físicas exige un compositor (sway y similares) que sepa colocar una ventana
-  por salida.
+  físicas exige un compositor (sway y similares) que sepa colocar una ventana por
+  salida — y aun así se quedaría en negro cuando esa GPU se cede a una VM.
+  `--mitades` es la salida barata: parte la única pantalla que hay, y los dos
+  monitores espejados muestran la misma división.
 - **El panel no puede correr mientras la GPU que mueve la consola está pasada**
   por VFIO a una VM: el conflicto de DRM master deja la pantalla en negro.
 - Las consolas se abren con `lxc-console`, no con `pct console`. Este último

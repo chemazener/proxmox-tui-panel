@@ -33,8 +33,9 @@ what is running and act on it, even when the network is down.
 - **GPU passthrough aware**: VMs holding a GPU through VFIO are shown as `VFIO·<tag>`
   instead of a meaningless 0 %.
 - **Actions**: start, stop and (for running containers) attach a console.
-- **Split views**: `--filtro=vivas` / `--filtro=apagadas` restrict the panel to
-  running or stopped machines, so you can dedicate a screen to each.
+- **Split views**: `--mitades` splits the screen into two columns, running on
+  the left and stopped on the right. `--filtro=vivas` / `--filtro=apagadas`
+  restrict the panel to one group, if you would rather run two instances.
 - Mouse and keyboard: `Tab` / arrows to move, `Enter` to press, `r` to refresh,
   `q` to quit.
 
@@ -43,6 +44,14 @@ what is running and act on it, even when the network is down.
 On a short terminal the cards keep their full height and the mosaic scrolls:
 
 ![Scrolling on a small terminal](docs/scroll.png)
+
+### Split screen
+
+`--mitades` puts running machines on the left and stopped ones on the right.
+Each half uses a single wide column, so names and absolute values stay readable
+and the overflow scrolls:
+
+![Split screen](docs/split.png)
 
 ### One view per state
 
@@ -78,6 +87,7 @@ Now run it:
 
 ```bash
 panel                    # all machines
+panel --mitades          # split: running | stopped
 panel --filtro=vivas     # running only
 panel --filtro=apagadas  # stopped only
 ```
@@ -144,7 +154,9 @@ install -m 600 config.example.json /etc/lxc-panel/config.json
 - **Two monitors cannot show different views under kmscon.** A seat owns a whole
   DRM device, not individual connectors, so two outputs on the same GPU get
   mirrored. Splitting views across physical screens needs a compositor (sway and
-  similar) that can place a window per output.
+  similar) that can place a window per output — and it would still go dark when
+  that GPU is passed through to a VM. `--mitades` is the cheap way out: it splits
+  the one screen you have, and both mirrored monitors show the same split.
 - **The panel cannot run while the GPU driving the console is passed through** to
   a VM: the DRM master conflict blanks the screen.
 - Consoles are opened with `lxc-console`, not `pct console`. The latter wraps the
