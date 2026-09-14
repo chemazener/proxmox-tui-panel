@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launch the panel by hand. Accepts the same arguments as the app, e.g.:
+#   panel --filtro=vivas
+exec /opt/lxc-panel/venv/bin/python /opt/lxc-panel/app.py "$@"

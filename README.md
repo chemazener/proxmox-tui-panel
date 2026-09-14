@@ -65,15 +65,25 @@ cd proxmox-tui-panel
 
 install -d /opt/lxc-panel
 install -m 644 app.py /opt/lxc-panel/app.py
+install -m 755 panel /usr/local/bin/panel
 python3 -m venv /opt/lxc-panel/venv
 /opt/lxc-panel/venv/bin/pip install "textual==8.2.7"
 ```
 
-Run it over SSH to try it out:
+On Debian you may need `apt install python3-venv` first — without it the virtual
+environment is created without `pip` and the Textual install fails with a
+confusing "No such file or directory".
+
+Now run it:
 
 ```bash
-/opt/lxc-panel/venv/bin/python /opt/lxc-panel/app.py
+panel                    # all machines
+panel --filtro=vivas     # running only
+panel --filtro=apagadas  # stopped only
 ```
+
+`panel` is a three-line launcher; the systemd unit below does **not** create it,
+so install it even if you only plan to use the service.
 
 ### On the host's monitor (optional)
 
@@ -87,6 +97,23 @@ systemctl enable --now lxc-panel.service
 The unit wraps the panel in kmscon on `tty1`, which gives you a proper font and
 mouse support on the console. It declares `Conflicts=getty@tty1.service`, so the
 login prompt on tty1 is replaced by the panel.
+
+kmscon is not packaged in Debian; the [Aetf fork](https://github.com/Aetf/kmscon)
+works well. Three things are easy to miss when installing it by hand: the
+`kmscon` in `PATH` is a wrapper script that execs the real binary from
+`libexec`, it needs `libtsm`, and it needs its **`mod-pango.so`** module (see the
+gotchas below).
+
+### Starting it on login (optional)
+
+To get the panel on every interactive root login as well, append
+[`profile-autostart.sh`](profile-autostart.sh) to `/root/.profile`. It is guarded
+so `ssh host "cmd"`, `scp` and `rsync` are unaffected — check that yourself after
+installing, because silently breaking them is unpleasant to debug:
+
+```bash
+time ssh root@your-host 'echo ok'    # must return immediately
+```
 
 ## Configuration
 
