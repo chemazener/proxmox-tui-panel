@@ -153,12 +153,19 @@ install -m 600 config.example.json /etc/lxc-panel/config.json
   Check `journalctl -u lxc-panel | grep "font engine"`; it must say `[pango]`.
   The module is `dlopen`ed, so `ldd` on the kmscon binary will not reveal the
   missing dependency.
-- **`--font-size` may be silently ignored.** Terminal geometry comes from the
-  font's cell metrics, so a smaller font means more columns. On one of my hosts
-  the option works as expected; on another kmscon always reports 8x16 cells no
-  matter the size (verified with 16, 40 and an explicit `--font-dpi`), even
-  though it says `font engine [pango]`. Measure before assuming:
-  `python3 -c "import fcntl,struct,termios;f=open('/dev/tty1','rb');print(struct.unpack('HHHH',fcntl.ioctl(f,termios.TIOCGWINSZ,b'\0'*8))[:2])"`
+- **Do not measure the terminal size on `/dev/tty1`.** Cell metrics come from the
+  font, so a smaller `--font-size` means more columns — but `TIOCGWINSZ` on
+  `/dev/tty1` reports the *kernel console* geometry, which never changes when you
+  restyle kmscon. It cost me a while to notice. Measure the pty the panel is
+  actually rendering into:
+
+  ```bash
+  PID=$(ps -eo pid,tty,cmd | awk '/app\.py/ && $2 ~ /pts/ {print $1; exit}')
+  TTY=$(ps -o tty= -p "$PID" | tr -d ' ')
+  python3 -c "import fcntl,struct,sys,termios
+  f=open('/dev/$TTY','rb')
+  print(struct.unpack('HHHH', fcntl.ioctl(f, termios.TIOCGWINSZ, b'\0'*8))[:2])"
+  ```
 - **Colour emoji do not render** on the console. DejaVu Sans Mono has no emoji
   glyphs, so the panel deliberately sticks to monochrome symbols. Verify a
   candidate glyph with
