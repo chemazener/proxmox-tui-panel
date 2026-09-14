@@ -41,7 +41,14 @@ caída.
   `--filtro=apagadas` limitan el panel a un solo grupo, si prefieres lanzar dos
   instancias.
 - Ratón y teclado: `Tab` y flechas para moverse, `Enter` para pulsar, `r` para
-  refrescar, `q` para salir.
+  refrescar, `q` para salir. La rueda del ratón desplaza el mosaico.
+- **Desplazamiento con el dedo**: cuando un mosaico desborda, aparece debajo una
+  barra a todo lo ancho con `▲ subir` y `▼ bajar`. En un terminal no existe el
+  gesto táctil —la aplicación solo recibe teclas y eventos de ratón—, así que un
+  deslizamiento solo llega si el emulador lo traduce a rueda, y la Shell web de
+  Proxmox no lo hace mientras la app tiene activado el seguimiento de ratón. Un
+  **toque**, en cambio, sí llega como clic: por eso desde el móvil se desplaza
+  pulsando.
 
 ### Scroll en lugar de recorte
 

@@ -37,7 +37,13 @@ what is running and act on it, even when the network is down.
   the left and stopped on the right. `--filtro=vivas` / `--filtro=apagadas`
   restrict the panel to one group, if you would rather run two instances.
 - Mouse and keyboard: `Tab` / arrows to move, `Enter` to press, `r` to refresh,
-  `q` to quit.
+  `q` to quit. The mouse wheel scrolls a mosaic.
+- **Touch-friendly scrolling**: when a mosaic overflows, a full-width
+  `▲ subir` / `▼ bajar` bar appears under it. A terminal has no concept of a
+  touch gesture — the app only ever receives keys and mouse events — so a swipe
+  only reaches it if the terminal emulator translates it into wheel events, and
+  Proxmox's web Shell does not while mouse tracking is on. A **tap**, however,
+  does arrive as a click, so tapping is the way to scroll from a phone.
 
 ### Scrolling instead of clipping
 

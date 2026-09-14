@@ -436,6 +436,48 @@ class ActionChip(Static):
             self.post_message(self.Pressed(self.action, self.vmid))
 
 
+class ScrollChip(Static):
+    """Flecha pulsable para desplazar un mosaico con el dedo.
+
+    En un terminal no existe el evento "táctil": la aplicación solo recibe teclas
+    y ratón. Un deslizamiento solo llega si el emulador lo traduce a rueda, y el
+    xterm.js de la Shell web de Proxmox no lo hace mientras la app tiene activado
+    el seguimiento de ratón. Un TOQUE, en cambio, sí llega como clic — así que la
+    forma de poder desplazar con el dedo es ofrecer algo que tocar.
+    """
+
+    can_focus = True
+
+    DEFAULT_CSS = """
+    ScrollChip {
+        height: 1; width: 1fr; text-align: center; content-align: center middle;
+        text-style: bold; color: $text; background: #334155;
+        margin-right: 1;
+    }
+    ScrollChip:hover { background: $primary; color: white; }
+    ScrollChip:focus { text-style: bold reverse; }
+    """
+
+    class Pressed(Message):
+        def __init__(self, grid_id: str, hacia: int) -> None:
+            self.grid_id = grid_id
+            self.hacia = hacia          # -1 arriba, +1 abajo
+            super().__init__()
+
+    def __init__(self, grid_id: str, hacia: int) -> None:
+        super().__init__("▲  subir" if hacia < 0 else "▼  bajar")
+        self.grid_id = grid_id
+        self.hacia = hacia
+
+    def on_click(self) -> None:
+        self.post_message(self.Pressed(self.grid_id, self.hacia))
+
+    def on_key(self, event) -> None:
+        if event.key in ("enter", "space"):
+            event.stop()
+            self.post_message(self.Pressed(self.grid_id, self.hacia))
+
+
 class MachineCard(Container):
     """Tarjeta por máquina dentro del Grid mosaico."""
 
@@ -561,6 +603,9 @@ class LXCPanel(App):
            llenar la pantalla; si aun así no cabe, se hace scroll. */
         grid-rows: 9;
     }
+    /* Barra de flechas táctiles; solo se muestra si el mosaico desborda. */
+    .scrollbar-tactil { height: 1; padding: 0 2; display: none; }
+    .scrollbar-tactil.visible { display: block; }
     /* Pantalla partida: encendidas a la izquierda, apagadas a la derecha. */
     #split { height: 1fr; }
     #split .col { width: 1fr; }
@@ -596,22 +641,28 @@ class LXCPanel(App):
         yield Static("Tab / ↑↓ moverse  ·  Enter pulsar  ·  R refrescar  ·  Q salir  ·  (ratón también)", id="toolbar")
         if self.mitades:
             yield Horizontal(
-                Vertical(
-                    Static("● ENCENDIDAS", classes="col-title on"),
-                    VerticalScroll(id="mosaic-vivas"),
-                    classes="col",
-                ),
-                Vertical(
-                    Static("○ APAGADAS", classes="col-title off"),
-                    VerticalScroll(id="mosaic-apagadas"),
-                    classes="col",
-                ),
+                self._columna("mosaic-vivas", "● ENCENDIDAS", "on"),
+                self._columna("mosaic-apagadas", "○ APAGADAS", "off"),
                 id="split",
             )
         else:
-            yield VerticalScroll(id="mosaic")
+            yield self._columna("mosaic")
         yield Static("", id="status-line")
         yield Footer()
+
+    def _columna(self, grid_id: str, titulo: str = "", variante: str = "") -> Vertical:
+        """Mosaico + su barra de flechas táctiles (y cabecera, en modo mitades)."""
+        hijos = []
+        if titulo:
+            hijos.append(Static(titulo, classes=f"col-title {variante}"))
+        hijos.append(VerticalScroll(id=grid_id))
+        hijos.append(Horizontal(
+            ScrollChip(grid_id, -1),
+            ScrollChip(grid_id, +1),
+            id=f"scroll-{grid_id}",
+            classes="scrollbar-tactil",
+        ))
+        return Vertical(*hijos, classes="col")
 
     def on_mount(self) -> None:
         self.title = "Proxmox Panel"
@@ -761,6 +812,13 @@ class LXCPanel(App):
         if grid.styles.grid_size_columns != cols:
             grid.styles.grid_size_columns = cols
 
+        # Las flechas solo estorban si no hay nada que desplazar.
+        desborda = -(-n // cols) * self._CARD_MIN_H > avail_h
+        try:
+            self.query_one(f"#scroll-{grid.id}", Horizontal).set_class(desborda, "visible")
+        except Exception:
+            pass
+
     def on_resize(self, event) -> None:
         for grid_id, cards in (getattr(self, "_cards", None) or {}).items():
             try:
@@ -777,11 +835,31 @@ class LXCPanel(App):
     def action_refresh(self) -> None:
         self.refresh_list()
 
+    def _find_card(self, vmid: int) -> Optional[MachineCard]:
+        """`_cards` está indexado por mosaico ({grid_id: {vmid: card}}), así que
+        una tarjeta puede estar en cualquiera de ellos (en modo mitades hay dos)."""
+        for cards in self._cards.values():
+            card = cards.get(vmid)
+            if card is not None:
+                return card
+        return None
+
+    def on_scroll_chip_pressed(self, event: ScrollChip.Pressed) -> None:
+        try:
+            grid = self.query_one(f"#{event.grid_id}", VerticalScroll)
+        except Exception:
+            return
+        if event.hacia < 0:
+            grid.scroll_page_up()
+        else:
+            grid.scroll_page_down()
+
     def on_action_chip_pressed(self, event: ActionChip.Pressed) -> None:
         action, vmid = event.action, event.vmid
         logging.info("chip pressed action=%s vmid=%s", action, vmid)
-        card = self._cards.get(vmid)
+        card = self._find_card(vmid)
         if card is None:
+            logging.warning("chip de una tarjeta que ya no existe: vmid=%s", vmid)
             return
         kind = card.kind
         if action == "start":
